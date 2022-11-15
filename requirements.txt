@@ -1,0 +1,11 @@
+torchaudio~=0.12.1
+torch~=1.12.1
+pandas~=1.5.0
+numpy~=1.23.3
+transformers~=4.22.1
+tokenizers~=0.12.1
+pydub~=0.25.1
+conformer
+gtts
+SpeechRecognition
+jellyfish
