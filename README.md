@@ -4,7 +4,10 @@
 
 **Children's Reading Assessment** is the task of evaluating the correctness of a child's read aloud speech of a passage. The main goal is to provide meaningful feedback of the read speech so that it can be used to improve their reading fluency. 
 
-`AIRFluTe` is an end-to-end application that can perform this reading assessment task in real-time. It leverages the power of streaming deep learning models fine-tuned on children's speech to process audio, provide visual tracking and feedback in real-time.
+`AIRFluTe` is an end-to-end application that can perform this reading assessment task in real-time. It leverages the power of streaming deep learning models fine-tuned on children's speech to process audio, provide visual tracking and feedback in real-time. 
+
+The salient feature of `AIRFluTe` is that along with this real-time visual feedback, an intelligent teacher model also follows along to the read-speech and will prompt (synthesised voice) whenever the reader faces a difficulty with a word. This helps provide a full audio-visual real-time multi-dimensional experience for the reader to improve their reading fluency using deep learning.
+
 This repository provides all the files needed to run the application locally on your browser.
 
 **Prerequisites:** [Python](https://www.python.org/downloads/) and [Anaconda](https://docs.anaconda.com/anaconda/install/index.html).
