@@ -6,9 +6,9 @@
 
 `AIRFluTe` is an end-to-end application that can perform this reading assessment task in real-time. It leverages the power of streaming deep learning models fine-tuned on children's speech to process audio and provide visual tracking and feedback in real-time.
 
-The salient feature of `AIRFluTe` is that, with real-time visual feedback, an intelligent teacher model also follows along to the read-speech and will prompt (using synthesized voice) whenever the reader encounters a difficult word. 
+The salient feature of `AIRFluTe` is that, in addition to the real-time visual feedback, an intelligent teacher model also follows along to the read-speech and will prompt (using synthesized voice) whenever the reader encounters a difficult word while reading. 
 
-AIRFluTe provides a complete audio-visual real-time multi-dimensional experience for the reader to improve their reading fluency using deep learning.
+`AIRFluTe` provides a complete audio-visual real-time multi-dimensional experience for the reader to improve their reading fluency using deep learning.
 
 This repository provides all the files needed to run the application locally on your browser.
 
