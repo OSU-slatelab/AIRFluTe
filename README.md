@@ -13,6 +13,8 @@ The salient feature of `AIRFluTe` is that, in addition to the real-time visual f
 This repository provides all the files needed to run the application locally on your browser.
 
 **Prerequisites:** [Python](https://www.python.org/downloads/) and [Anaconda](https://docs.anaconda.com/anaconda/install/index.html).
+Gradio documentation can be found [here](https://www.gradio.app/docs/).
+
 ## Getting Started
 
 To install this application, run the following commands:
