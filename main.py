@@ -19,13 +19,16 @@ import re
 import datetime
 from pydub import AudioSegment
 
+# Model initializations
 ID2CLS = {0: 'correct', 1: 'incorrect', 2: 'prompt', 3: 'repeat', 4: 'skip', 5: 'stutter', 6: 'tracking'}
 ID2DET = {0: 'fluent', 1: 'not fluent'}
 r = sr.Recognizer()
 cntr = 1
 
+# wav2vec2 for ASR
 p = pipeline("automatic-speech-recognition")
 
+# RNN-T for ASR (Reader)
 rnnt_config = {'fmask': 27, 'nspeech-feat': 80, 'sample-rate': 16000, 'n_layer': 6,
               'in_dim': 960, 'hid_tr': 512, 'hid_pr': 1024, 'head_dim': 64,
               'nhead': 1, 'beam-size': 16, 'dropout': 0.25, 'enc_type': 'lstm',
@@ -39,6 +42,7 @@ pt_load_dict(rnnt_model, checkpoint['state_dict'], ddp=False)
 normalizer = checkpoint['normalizer'].to('cpu')
 rnnt_model.eval()
 
+# Detector for evaluation (Classifier)
 tokenizer_path = "tokenizers/librispeech.json"
 tokenizer = Tokenizer.from_file(tokenizer_path)
 vocab_size = 2 + tokenizer.get_vocab_size()
@@ -53,6 +57,13 @@ norm = load_pick(norm_path)
 
 
 def get_time(tml):
+    """
+        Gets time in seconds from the Gradio's stream state
+        Parameters:
+            tml - Gradio's stream state
+        Returns:
+            Time in seconds since the start of the speaking session
+    """
     if len(tml) == 0:
         return 0
     elif len(tml) == 1:
@@ -63,9 +74,20 @@ def get_time(tml):
 
 
 def track(trs, psg, st):
+    """
+        Tracks the words read in the reading passage
+        Parameters:
+            trs - Latest ASR Transcription
+            psg - Complete Reading passage
+            st - Gradio's stream state
+        Returns:
+            Index of the latest word read in the reading passage
+    """
     trk = 0
     said = re.sub(' +', ' ', trs).lstrip().rstrip().split(" ")
     passage = psg.lstrip().rstrip().split(" ")
+    
+    # Evaluating indices & visted/tracked status of words in the reading passage to handle repeated words
     positions = []
     visited = {}
     for ix, elt in enumerate(passage):
@@ -76,6 +98,8 @@ def track(trs, psg, st):
             visited[post] = 'nv'
         positions.append(post)
 
+    # Evaluating ordered combinations of terms in the ASR transcription in case a single word is stretched 
+    # across multiple terms (ca t ch i ld => catch ild or cat child etc.)
     if len(said) != 0:
         psgd = {k: v for v, k in enumerate(positions)}
         allc = []
@@ -86,7 +110,8 @@ def track(trs, psg, st):
         allw = positions
         if allc is not None:
             allw += allc
-
+        
+        # Evaluating soundex phonetic encodings
         report = pd.DataFrame([allw]).T
         report.columns = ['word']
         report[soundex.__name__] = report['word'].apply(lambda x: soundex(x.split('_')[0]))
@@ -96,6 +121,8 @@ def track(trs, psg, st):
         report2 = report.copy()
         report2[soundex.__name__] = np.nan
 
+        # Evaluating the closest sounding words from the reading passage and the transcription 
+        # in the current sliding window
         if allc is not None:
             for word in allc:
                 closest_list = []
@@ -130,6 +157,14 @@ def track(trs, psg, st):
 
 
 def transcribe(audio, state=""):
+    """
+        Transcribes the streaming audio input, tracks the read speech and invokes the Classifier
+        Parameters:
+            audio - Streaming audio input from microphone
+            state - Gradio's stream state
+        Returns:
+            Invokes Classifier after ASR transcription & tracking
+    """
     time.sleep(2)
     lines = ""
     with open("passage.txt", encoding='cp437') as f:
@@ -149,6 +184,8 @@ def transcribe(audio, state=""):
     curr_state = "".join(";".join(re.findall('{.*?}', step_state)).replace("{", "")).replace("}", "").split(";")
     if len(curr_state) == 4:
         st_ix = max(int(curr_state[2]), int(st_ix))
+        
+    # ASR transcription from wav2vec2
     text = p(audio)["text"]
     timeT = str(int(time.time()))
     state += "%!" + timeT + "!"
@@ -165,19 +202,25 @@ def transcribe(audio, state=""):
         en_state = max(en_state, int(ptl[2].replace('{', '').replace('}','')))
     timed = get_time(tm_state)
     if timed%4 == 0:
+        # ASR transcription from RNN-T Reader (run every 4th second for lengthier audio input chunks)
         hyph = get_asr1(audio)
         state += " $" + hyph + "$ "
     else:
         state += " $$ "
+    
+    # Tracking the index of the latest read word using the transcriptions
     en_iy = track(tx_state, read, st_ix)
     en_ix = max(max(en_iy, track(tr_state, read, st_ix) + 1), en_state)
     till = " ".join(readlist[: en_ix])
     rest = readlist[en_ix :]
     em = 0
+    
+    # Adding prompts in case a <tag> is produced in the ASR transcription
     for iy, yts in enumerate(reversed(tx_state.split(" "))):
         if yts == '<tag>':
                 return get_report_teach(till, audio, st_ix, en_ix, state, rest, yts[min(iy+1, len(tx_state.split(" "))-1)])
 
+    # Adding prompts in case of silence (hesitations/pauses)
     for yts in reversed(tr_state):
         if yts == ' ':
             em = em + 1
@@ -191,6 +234,14 @@ def transcribe(audio, state=""):
 
 
 def transcribe4(audio, state=""):
+    """
+        Transcribes the streaming audio input, tracks the read speech and invokes the Classifier
+        Parameters:
+            audio - Streaming audio input from microphone
+            state - Gradio's stream state
+        Returns:
+            Invokes Classifier after ASR transcription & tracking
+    """
     time.sleep(4)
     lines = ""
     with open("passage.txt", encoding='cp437') as f:
@@ -210,7 +261,10 @@ def transcribe4(audio, state=""):
     curr_state = "".join(";".join(re.findall('{.*?}', step_state)).replace("{", "")).replace("}", "").split(";")
     if len(curr_state) == 4:
         st_ix = max(int(curr_state[2]), int(st_ix))
+    
+    # ASR transcription from RNN-T Reader every 4th second
     text = get_asr1(audio)
+    
     timeT = str(int(time.time()))
     state += "%!" + timeT + "!"
     state += " <" + text + "> "
@@ -230,16 +284,21 @@ def transcribe4(audio, state=""):
         state += " $" + hyph + "$ "
     else:
         state += " $$ "
+    
+    # Tracking the index of the latest read word using the transcription
     en_iy = track(tx_state, read, st_ix)
     en_ix = max(en_iy, en_state)
     till = " ".join(readlist[: en_ix])
     rest = readlist[en_ix:]
     em = 0
+    
+    # Adding prompts in case a <tag> is detected
     for iy, yts in enumerate(reversed(tx_state.split(" "))):
         if yts == '<tag>':
             return get_report_teach(till, audio, st_ix, en_ix, state, rest,
                                     yts[min(iy + 1, len(tx_state.split(" ")) - 1)])
 
+    # Adding prompts in case of silence (hesitations)
     for yts in reversed(yt_state):
         if yts == ' ':
             em = em + 1
@@ -254,6 +313,21 @@ def transcribe4(audio, state=""):
 
 
 def get_report_teach(read, audio, st_ix, en_ix, state, full, prm=""):
+    """
+        Detects & classifies disfluencies in the reading and provides visual (color highlights) & audio (teacher prompts)
+        Parameters:
+            read - Portion of the reading passage read till now (from starting word till tracked word)
+            audio - Streaming audio input from microphone
+            st_ix - Index of the starting word in the reading passage read in the current sliding window
+            en_ix - Index of the ending/tracked word in the reading passage read in the current sliding window
+            state - Gradio's stream state
+            full - Complete reading passage
+            prm - Word(s) to be prompted
+        Returns:
+            List of tuples consisting of words from the reading passage & the disfluent classes they fall into
+            Auto played hidden audio element to provide oral prompts
+            Gradio's stream state
+    """
     if audio is None:
         return "", "", "", ""
     all_res = []
@@ -263,6 +337,8 @@ def get_report_teach(read, audio, st_ix, en_ix, state, full, prm=""):
     words = text.split()
     y_cls = []
     y_scr = []
+    
+    # Classification into disfluent classes & evaluation of current score
     if len(read) > 0:
         wav, org_sr = torchaudio.load(audio)
         wav = AT.Resample(org_sr, 16000)(wav)
@@ -319,8 +395,10 @@ def get_report_teach(read, audio, st_ix, en_ix, state, full, prm=""):
     for fils in os.listdir():
         if re.search('welcome*', fils):
             os.remove(fils)
-
+  
+    # Synthesizing teacher prompts - in case of long hesitations & disfluency detection
     if sprt != '':
+        # In case of long 
         prmpt = sprt
         filen = "welcome" + dts + ".mp3"
     elif sprt == '' and fprt != '':
@@ -332,6 +410,8 @@ def get_report_teach(read, audio, st_ix, en_ix, state, full, prm=""):
         aud.set_frame_rate(aud.frame_rate).export(filen)
     else:
         prmpt = 'read'
+    
+    # Adding current classifications, sliding window updates and scores to Gradio's stream state
     fullz = list(zip(full, ["yet to read"] * len(full)))
     firstz = list(zip(words, y_cls))
     firstz.extend(fullz)
@@ -352,6 +432,7 @@ def get_report_teach(read, audio, st_ix, en_ix, state, full, prm=""):
                     if el_cls == 'correct':
                         scr_res = scr_res + 1
                     all_res.append((el_wrd, el_cls, scr_res))
+                    
     htmlText = f"""
         <div>
             <br>
@@ -367,10 +448,24 @@ def get_report_teach(read, audio, st_ix, en_ix, state, full, prm=""):
 
 
 def get_report_file(filen, audio, state=""):
+    """
+        Invokes the Classifier to classify & evaluate the read speech in an uploaded audio file using the text from a
+        reading passage into disfluency classes, produces visual feedback using colorful highlighted text
+        Parameters:
+            filen - Text file containing the reading passage
+            audio - Audio input from an uploaded audio file
+            state - Gradio's stream state
+        Returns:
+            List of tuples consisting of words from the reading passage & the disfluent classes they fall into
+            HTMLText showing count of words read correctly
+            Gradio's stream state
+    """
     filen.seek(0)
     read = filen.read().decode('utf-8')
     if audio is None:
         return "", ""
+    
+    # Classification into disfluent classes & evaluation of current score
     wav, org_sr = torchaudio.load(audio)
     wav = AT.Resample(org_sr, 16000)(wav)
     features = compute_stft(wav)
@@ -414,6 +509,13 @@ def get_report_file(filen, audio, state=""):
 
 
 def get_asr1(audio):
+    """
+       Transcribes the streaming audio input using the RNN-T Reader model
+       Parameters:
+           audio - Streaming audio input from a microphone
+       Returns:
+           ASR transcription of the audio
+    """
     wav, org_sr = torchaudio.load(audio)
     wav = AT.Resample(org_sr, 16000)(wav)
     features = compute_stft(wav)
@@ -432,6 +534,13 @@ def get_asr1(audio):
 
 
 def get_asr(audio):
+    """
+       Transcribes the audio input using the RNN-T Reader model
+       Parameters:
+           audio - Audio input from an uploaded audio file
+       Returns:
+           ASR transcription of the audio
+    """
     wav, org_sr = torchaudio.load(audio)
     wav = AT.Resample(org_sr, 16000)(wav)
     features = compute_stft(wav)
@@ -455,6 +564,13 @@ def get_asr(audio):
 
 
 def speak(filen):
+    """
+       Produces text-to-speech output using a synthesized teacher's voice
+       Parameters:
+           filen - Text file with the passage to be read
+       Returns:
+           Audio of the synthesized speech
+    """
     filen.seek(0)
     lines = filen.read().decode('utf-8')
     aud = gTTS(text=clean4asr(lines), lang='en', slow=True).save("welcome.mp3")
@@ -473,6 +589,7 @@ def speak(filen):
     return htmlText
 
 
+# Tab 1 provides a slowed down reading (synthesized teacher's voice) of a txt file containing the reading passage
 tab1 = gr.Interface(
     fn=speak,
     inputs=[gr.File(type="file", file_count="single", label="Reading passage")],
@@ -484,6 +601,8 @@ tab1 = gr.Interface(
     show_api=False
 )
 
+# Tab 2 provides visual (color highlights) and oral (synthesised teacher prompts) feedback in real-time
+# For the ASR transcription, it uses the wav2vec2 and RNN-T Reader; takes as input streaming audio from the microphone
 tab2 = gr.Interface(
     fn=transcribe,
     inputs=[gr.Audio(source="microphone", type="filepath", streaming=True).style(rounded=True),
@@ -499,6 +618,8 @@ tab2 = gr.Interface(
     theme="grass"
 )
 
+# Tab 3 provides visual (color highlights) and oral (synthesised teacher prompts) feedback in real-time
+# For the ASR transcription, it uses the RNN-T Reader; takes as input streaming audio from the microphone
 tab3 = gr.Interface(
     fn=transcribe4,
     inputs=[gr.Audio(source="microphone", type="filepath", streaming=True),
@@ -511,6 +632,8 @@ tab3 = gr.Interface(
     show_api=False
 )
 
+# Tab 4 runs the Classifier on a complete uploaded audio file & a text file containing the reading passage to classify
+# the uttered words in the passage into the various disfluency classes
 tab4 = gr.Interface(
     fn=get_report_file,
     inputs=[gr.File(type="file", file_count="single", label="Reading passage"),
@@ -524,7 +647,7 @@ tab4 = gr.Interface(
     show_api=False
 )
 
-
+# Tab 5 runs the RNN-T Reader on a complete uploaded audio file to provide the ASR transcription
 tab5 = gr.Interface(
     fn=get_asr,
     inputs=gr.Audio(source="upload", type="filepath"),
@@ -535,6 +658,7 @@ tab5 = gr.Interface(
     show_api=False
 )
 
+# Gradio's tabbed interface element to group all the tabs in a single demo
 demo = gr.TabbedInterface(interface_list=[tab1, tab2, tab3, tab4, tab5],
                           tab_names=["Listen to a Teacher", "Read with a Teacher 1",
                                      "Read with a Teacher 2", "Upload a recorded file", "Transcribe a file"])
